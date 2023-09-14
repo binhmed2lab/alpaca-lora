@@ -1,10 +1,13 @@
 import os
 import sys
 from typing import List
+import json
+from tqdm import tqdm
 
 import fire
 import torch
 import transformers
+from transformers import GenerationConfig
 from datasets import load_dataset
 
 """
@@ -56,6 +59,7 @@ def train(
     wandb_log_model: str = "",  # options: false | true
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
     prompt_template_name: str = "alpaca",  # The prompt template to use, will default to alpaca.
+    test_path: str = None
 ):
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(
@@ -89,6 +93,12 @@ def train(
     gradient_accumulation_steps = batch_size // micro_batch_size
 
     prompter = Prompter(prompt_template_name)
+
+    print("This is example prompter", prompter.generate_prompt(
+        instruction= "This is Instruction",
+        input= "This is Input",
+        label= "This is Label"
+    ))
 
     device_map = "auto"
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -171,7 +181,7 @@ def train(
             ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    model = prepare_model_for_int8_training(model)
+    # model = prepare_model_for_int8_training(model)
 
     config = LoraConfig(
         r=lora_r,
@@ -266,11 +276,87 @@ def train(
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
     model.save_pretrained(output_dir)
+    
+    if test_path is not None:
+        test_data = read_json(test_path)
+        evaluate_model(
+            data=test_data,
+            model=model,
+            tokenizer=tokenizer
+        )
 
-    print(
-        "\n If there's a warning about missing keys above, please disregard :)"
+def read_json(path):                            
+    f = open(path)
+    data = json.load(f)
+    f.close()
+    return data
+
+def write_json(path, obj):
+    if not path.endswith(".json"):
+        path += ".json"
+
+    json_object = json.dumps(obj, indent=4, ensure_ascii=False)
+    with open(path, "w", encoding="utf-8") as outfile:
+        outfile.write(json_object)
+
+
+def generate_response(prompt, model, tokenizer):
+    encoding = tokenizer(prompt, padding=True, truncation=True, return_tensors="pt", max_length = 1024)
+    input_ids = encoding["input_ids"].to(model.device)
+        
+    generation_config = GenerationConfig(
+        temperature=0.1,
+        top_p=1,
+        do_sample = True,
+        num_beams = 1
     )
+    with torch.inference_mode():
+        return model.generate(
+            input_ids=input_ids,
+            generation_config=generation_config,
+            return_dict_in_generate=True,
+            output_scores=True,
+            max_new_tokens=512,
+        )
 
+def create_prompt(item):
+    prompt = f"[INST] <<SYS>>\n{item['instruction']}\n<</SYS>>\n\n{item['input']} [/INST]"
+    return prompt
+
+def format_response(response, tokenizer):
+    if response.sequences.size(0) == 1:
+        decoded_output = tokenizer.decode(response.sequences[0], skip_special_tokens = True)
+        response = decoded_output.split("[/INST]")[1].strip()
+    else:
+        decoded_outputs = tokenizer.batch_decode(response.sequences, skip_special_tokens=True)
+        response = []
+        for o in decoded_outputs:
+            response.append(o.split("[/INST]")[1].strip())
+    return response
+
+def ask_alpaca(prompt, model, tokenizer):
+    response = generate_response(prompt, model, tokenizer)
+    response = format_response(response, tokenizer)
+    return response
+
+def evaluate_model(data, model, tokenizer, batch_size = 4):
+    references = [d['output'] for d in data]
+    
+    predictions = []
+    tk = tqdm(range(0, len(data), batch_size))
+    for start_idx in tk:
+        batch = data[start_idx:start_idx+batch_size]
+        batch = [create_prompt(b) for b in batch]
+        preds = ask_alpaca(batch, model, tokenizer)
+        predictions += preds
+        tk.set_postfix(example=preds[0])
+
+    for idx in range(len(data)):
+        data[idx]['prediction'] = predictions[idx]
+
+    write_json("test_result.json", data)
+
+    return data
 
 if __name__ == "__main__":
     fire.Fire(train)
