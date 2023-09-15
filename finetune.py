@@ -21,6 +21,7 @@ from peft import (
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
 from transformers import LlamaForCausalLM, LlamaTokenizer
@@ -181,7 +182,7 @@ def train(
             ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    # model = prepare_model_for_int8_training(model)
+    model = prepare_model_for_kbit_training(model)
 
     config = LoraConfig(
         r=lora_r,
@@ -278,7 +279,9 @@ def train(
     model.save_pretrained(output_dir)
     
     if test_path is not None:
+        print("Start test", test_path)
         test_data = read_json(test_path)
+        model.eval()
         evaluate_model(
             data=test_data,
             model=model,
@@ -308,7 +311,8 @@ def generate_response(prompt, model, tokenizer):
         temperature=0.1,
         top_p=1,
         do_sample = True,
-        num_beams = 1
+        num_beams = 1,
+        top_k = 50
     )
     with torch.inference_mode():
         return model.generate(
@@ -349,7 +353,10 @@ def evaluate_model(data, model, tokenizer, batch_size = 4):
         batch = [create_prompt(b) for b in batch]
         preds = ask_alpaca(batch, model, tokenizer)
         predictions += preds
-        tk.set_postfix(example=preds[0])
+        examples = [p[:50] for p in preds]
+        tk.set_postfix(
+            examples=examples,
+        )
 
     for idx in range(len(data)):
         data[idx]['prediction'] = predictions[idx]
