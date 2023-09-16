@@ -60,7 +60,9 @@ def train(
     wandb_log_model: str = "",  # options: false | true
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
     prompt_template_name: str = "alpaca",  # The prompt template to use, will default to alpaca.
-    test_path: str = None
+    test_path: str = None, # Run test case
+    huggingface_token: str = None, # token to login huggingface
+    huggingface_repo: str = None # push to repo
 ):
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(
@@ -182,7 +184,7 @@ def train(
             ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    model = prepare_model_for_kbit_training(model)
+    model = prepare_model_for_int8_training(model)
 
     config = LoraConfig(
         r=lora_r,
@@ -288,6 +290,13 @@ def train(
             tokenizer=tokenizer
         )
 
+    if huggingface_token is not None & huggingface_repo is not None:
+        from huggingface_hub import login
+        login(token = huggingface_token)
+        model.push_to_hub(
+            huggingface_repo
+        )
+
 def read_json(path):                            
     f = open(path)
     data = json.load(f)
@@ -306,7 +315,8 @@ def write_json(path, obj):
 def generate_response(prompt, model, tokenizer):
     encoding = tokenizer(prompt, padding=True, truncation=True, return_tensors="pt", max_length = 1024)
     input_ids = encoding["input_ids"].to(model.device)
-        
+    attention_mask = encoding['attention_mask'].to(model.device)
+
     generation_config = GenerationConfig(
         temperature=0.1,
         top_p=1,
@@ -317,6 +327,7 @@ def generate_response(prompt, model, tokenizer):
     with torch.inference_mode():
         return model.generate(
             input_ids=input_ids,
+            attention_mask=attention_mask,
             generation_config=generation_config,
             return_dict_in_generate=True,
             output_scores=True,
