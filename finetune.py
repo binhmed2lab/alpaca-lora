@@ -3,6 +3,7 @@ import sys
 from typing import List
 import json
 from tqdm import tqdm
+import wandb
 
 import fire
 import torch
@@ -62,7 +63,8 @@ def train(
     prompt_template_name: str = "alpaca",  # The prompt template to use, will default to alpaca.
     test_path: str = None, # Run test case
     huggingface_token: str = None, # token to login huggingface
-    huggingface_repo: str = None # push to repo
+    huggingface_repo: str = None, # push to repo
+    wandb_api_key: str = None, # Wandb api key
 ):
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(
@@ -121,6 +123,8 @@ def train(
         os.environ["WANDB_WATCH"] = wandb_watch
     if len(wandb_log_model) > 0:
         os.environ["WANDB_LOG_MODEL"] = wandb_log_model
+
+    wandb.login(key=wandb_api_key)
 
     model = LlamaForCausalLM.from_pretrained(
         base_model,
@@ -290,7 +294,7 @@ def train(
             tokenizer=tokenizer
         )
 
-    if huggingface_token is not None & huggingface_repo is not None:
+    if isinstance(huggingface_token, str) and isinstance(huggingface_repo,str):
         from huggingface_hub import login
         login(token = huggingface_token)
         model.push_to_hub(
