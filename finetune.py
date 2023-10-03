@@ -22,12 +22,18 @@ from peft import (
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
-    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
 from transformers import LlamaForCausalLM, LlamaTokenizer
 
 from utils.prompter import Prompter
+
+SYS_PREFIX = "<<SYS>>\n"
+SYS_POSTFIX = "\n<</SYS>>\n\n"
+INST_PREFIX = "<s>[INST] "
+INST_POSTFIX = " "
+OUTPUT_PREFIX = "[/INST] "
+OUTPUT_POSTFIX = "</s>"
 
 
 def train(
@@ -43,6 +49,7 @@ def train(
     cutoff_len: int = 256,
     val_set_size: int = 2000,
     # lora hyperparams
+    train_lora: bool = True,
     lora_r: int = 8,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
@@ -162,6 +169,61 @@ def train(
 
         return result
 
+    def preprocess(conversations):
+        all_input_ids = []
+        all_labels = []
+
+        for conv in conversations:
+            roles = [msg["role"] for msg in conv]
+            messages = [msg["content"] for msg in conv]
+
+            assert roles[0].upper() != "ASSISTANT"
+            assert roles[-1].upper() == "ASSISTANT"
+
+            input_messages = []
+            if roles[0].upper() == "SYSTEM":
+                input_messages.append(SYS_PREFIX+messages[0]+SYS_POSTFIX)
+
+            for role, msg in zip(roles, messages):
+                if role.upper() == "ASSISTANT":
+                    input_messages.append(msg + OUTPUT_POSTFIX)
+                elif role.upper() == "USER":
+                    input_messages.append(INST_PREFIX + msg + INST_POSTFIX + OUTPUT_PREFIX)
+
+            tokenized_input = tokenizer(input_messages, add_special_tokens=False)
+
+            input_ids = []
+            labels = []
+
+            if roles[0].upper() == "SYSTEM":
+                input_ids.extend(tokenized_input.input_ids[0])
+                labels.extend([-100]*len(tokenized_input.input_ids[0]))
+
+            for role, msg in zip(roles, tokenized_input.input_ids):
+
+                if role.upper() == "USER":
+                    labels.extend([-100]*len(msg))
+                    input_ids.extend(msg)
+                
+                elif role.upper() == "ASSISTANT":
+                    labels.extend(msg)
+                    input_ids.extend(msg)
+
+
+            input_ids = torch.LongTensor(input_ids)[:cutoff_len]
+            labels = torch.LongTensor(labels)[:cutoff_len]
+
+            assert input_ids.shape == labels.shape   
+
+            all_input_ids.append(input_ids)  
+            all_labels.append(labels)
+
+
+        return {
+            "input_ids": all_input_ids,
+            "labels": all_labels
+        }
+
     def generate_and_tokenize_prompt(data_point):
         full_prompt = prompter.generate_prompt(
             data_point["instruction"],
@@ -188,17 +250,18 @@ def train(
             ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    model = prepare_model_for_int8_training(model)
+    if train_lora:
+        model = prepare_model_for_int8_training(model)
 
-    config = LoraConfig(
-        r=lora_r,
-        lora_alpha=lora_alpha,
-        target_modules=lora_target_modules,
-        lora_dropout=lora_dropout,
-        bias="none",
-        task_type="CAUSAL_LM",
-    )
-    model = get_peft_model(model, config)
+        config = LoraConfig(
+            r=lora_r,
+            lora_alpha=lora_alpha,
+            target_modules=lora_target_modules,
+            lora_dropout=lora_dropout,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(model, config)
 
     if data_path.endswith(".json") or data_path.endswith(".jsonl"):
         data = load_dataset("json", data_files=data_path)
@@ -225,20 +288,21 @@ def train(
         else:
             print(f"Checkpoint {checkpoint_name} not found")
 
-    model.print_trainable_parameters()  # Be more transparent about the % of trainable params.
+    if train_lora:
+        model.print_trainable_parameters()  # Be more transparent about the % of trainable params.
 
     if val_set_size > 0:
         train_val = data["train"].train_test_split(
             test_size=val_set_size, shuffle=True, seed=42
         )
         train_data = (
-            train_val["train"].shuffle().map(generate_and_tokenize_prompt)
+            train_val["train"].shuffle().map(preprocess)
         )
         val_data = (
-            train_val["test"].shuffle().map(generate_and_tokenize_prompt)
+            train_val["test"].shuffle().map(preprocess)
         )
     else:
-        train_data = data["train"].shuffle().map(generate_and_tokenize_prompt)
+        train_data = data["train"].shuffle().map(preprocess)
         val_data = None
 
     if not ddp and torch.cuda.device_count() > 1:
@@ -339,18 +403,19 @@ def generate_response(prompt, model, tokenizer):
         )
 
 def create_prompt(item):
-    prompt = f"[INST] <<SYS>>\n{item['instruction']}\n<</SYS>>\n\n{item['input']} [/INST]"
+    prompt = f"{SYS_PREFIX}\n{item['instruction']}\n{SYS_POSTFIX}"
+    prompt += f"\n\n{INST_PREFIX} {item['input']} {INST_POSTFIX} {OUTPUT_PREFIX}"
     return prompt
 
 def format_response(response, tokenizer):
     if response.sequences.size(0) == 1:
         decoded_output = tokenizer.decode(response.sequences[0], skip_special_tokens = True)
-        response = decoded_output.split("[/INST]")[1].strip()
+        response = decoded_output.split(INST_POSTFIX)[1].strip()
     else:
         decoded_outputs = tokenizer.batch_decode(response.sequences, skip_special_tokens=True)
         response = []
         for o in decoded_outputs:
-            response.append(o.split("[/INST]")[1].strip())
+            response.append(o.split(INST_POSTFIX)[1].strip())
     return response
 
 def ask_alpaca(prompt, model, tokenizer):
