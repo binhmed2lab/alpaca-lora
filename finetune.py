@@ -170,60 +170,52 @@ def train(
         return result
 
     def preprocess(data_point):
-        conversations = data_point['dialog']
+        dialog = data_point['dialog']
+
+        roles = [msg["role"] for msg in dialog]
+        messages = [msg["content"] for msg in dialog]
+
+        assert roles[0].upper() != "ASSISTANT"
+        assert roles[-1].upper() == "ASSISTANT"
+
+        input_messages = []
+        if roles[0].upper() == "SYSTEM":
+            input_messages.append(SYS_PREFIX+messages[0]+SYS_POSTFIX)
+
+        for role, msg in zip(roles, messages):
+            if role.upper() == "ASSISTANT":
+                input_messages.append(msg + OUTPUT_POSTFIX)
+            elif role.upper() == "USER":
+                input_messages.append(INST_PREFIX + msg + INST_POSTFIX + OUTPUT_PREFIX)
+
+        tokenized_input = tokenizer(input_messages, add_special_tokens=False)
+
+        input_ids = []
+        labels = []
+
+        if roles[0].upper() == "SYSTEM":
+            input_ids.extend(tokenized_input.input_ids[0])
+            labels.extend([-100]*len(tokenized_input.input_ids[0]))
+
+        for role, msg in zip(roles, tokenized_input.input_ids):
+
+            if role.upper() == "USER":
+                labels.extend([-100]*len(msg))
+                input_ids.extend(msg)
             
-        all_input_ids = []
-        all_labels = []
-
-        for conv in conversations:
-            roles = [msg["role"] for msg in conv]
-            messages = [msg["content"] for msg in conv]
-
-            assert roles[0].upper() != "ASSISTANT"
-            assert roles[-1].upper() == "ASSISTANT"
-
-            input_messages = []
-            if roles[0].upper() == "SYSTEM":
-                input_messages.append(SYS_PREFIX+messages[0]+SYS_POSTFIX)
-
-            for role, msg in zip(roles, messages):
-                if role.upper() == "ASSISTANT":
-                    input_messages.append(msg + OUTPUT_POSTFIX)
-                elif role.upper() == "USER":
-                    input_messages.append(INST_PREFIX + msg + INST_POSTFIX + OUTPUT_PREFIX)
-
-            tokenized_input = tokenizer(input_messages, add_special_tokens=False)
-
-            input_ids = []
-            labels = []
-
-            if roles[0].upper() == "SYSTEM":
-                input_ids.extend(tokenized_input.input_ids[0])
-                labels.extend([-100]*len(tokenized_input.input_ids[0]))
-
-            for role, msg in zip(roles, tokenized_input.input_ids):
-
-                if role.upper() == "USER":
-                    labels.extend([-100]*len(msg))
-                    input_ids.extend(msg)
-                
-                elif role.upper() == "ASSISTANT":
-                    labels.extend(msg)
-                    input_ids.extend(msg)
+            elif role.upper() == "ASSISTANT":
+                labels.extend(msg)
+                input_ids.extend(msg)
 
 
-            input_ids = torch.LongTensor(input_ids)[:cutoff_len]
-            labels = torch.LongTensor(labels)[:cutoff_len]
+        input_ids = torch.LongTensor(input_ids)
+        labels = torch.LongTensor(labels)
 
-            assert input_ids.shape == labels.shape   
-
-            all_input_ids.append(input_ids)  
-            all_labels.append(labels)
-
+        assert input_ids.shape == labels.shape
 
         return {
-            "input_ids": all_input_ids,
-            "labels": all_labels
+            "input_ids": input_ids,
+            "labels": labels
         }
 
     def generate_and_tokenize_prompt(data_point):
