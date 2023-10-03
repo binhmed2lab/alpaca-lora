@@ -169,7 +169,9 @@ def train(
 
         return result
 
-    def preprocess(conversations):
+    def preprocess(data_point):
+        conversations = data_point['dialog']
+            
         all_input_ids = []
         all_labels = []
 
