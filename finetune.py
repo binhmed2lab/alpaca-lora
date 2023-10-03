@@ -208,8 +208,8 @@ def train(
                 input_ids.extend(msg)
 
 
-        input_ids = torch.LongTensor(input_ids)
-        labels = torch.LongTensor(labels)
+        input_ids = torch.LongTensor(input_ids)[:cutoff_len]
+        labels = torch.LongTensor(labels)[:cutoff_len]
 
         assert input_ids.shape == labels.shape
 
