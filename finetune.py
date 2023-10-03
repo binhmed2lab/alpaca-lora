@@ -397,19 +397,19 @@ def generate_response(prompt, model, tokenizer):
         )
 
 def create_prompt(item):
-    prompt = f"{SYS_PREFIX}\n{item['instruction']}\n{SYS_POSTFIX}"
-    prompt += f"\n\n{INST_PREFIX} {item['input']} {INST_POSTFIX} {OUTPUT_PREFIX}"
+    prompt = f"{SYS_PREFIX}{item['instruction']}{SYS_POSTFIX}"
+    prompt += f"{INST_PREFIX}{item['input']}{INST_POSTFIX}{OUTPUT_PREFIX}"
     return prompt
 
 def format_response(response, tokenizer):
     if response.sequences.size(0) == 1:
         decoded_output = tokenizer.decode(response.sequences[0], skip_special_tokens = True)
-        response = decoded_output.split(INST_POSTFIX)[1].strip()
+        response = decoded_output.split(OUTPUT_PREFIX)[1].strip()
     else:
         decoded_outputs = tokenizer.batch_decode(response.sequences, skip_special_tokens=True)
         response = []
         for o in decoded_outputs:
-            response.append(o.split(INST_POSTFIX)[1].strip())
+            response.append(o.split(OUTPUT_PREFIX)[1].strip())
     return response
 
 def ask_alpaca(prompt, model, tokenizer):
