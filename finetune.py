@@ -26,8 +26,6 @@ from peft import (
 )
 from transformers import LlamaForCausalLM, LlamaTokenizer
 
-from utils.prompter import Prompter
-
 SYS_PREFIX = "<<SYS>>\n"
 SYS_POSTFIX = "\n<</SYS>>\n\n"
 INST_PREFIX = "<s>[INST] "
@@ -35,6 +33,55 @@ INST_POSTFIX = " "
 OUTPUT_PREFIX = "[/INST] "
 OUTPUT_POSTFIX = "</s>"
 
+def preprocess(data_point):
+    global tokenizer, cutoff_len
+    dialog = data_point['dialog']
+
+    roles = [msg["role"] for msg in dialog]
+    messages = [msg["content"] for msg in dialog]
+
+    assert roles[0].upper() != "ASSISTANT"
+    assert roles[-1].upper() == "ASSISTANT"
+
+    input_messages = []
+    if roles[0].upper() == "SYSTEM":
+        input_messages.append(SYS_PREFIX+messages[0]+SYS_POSTFIX)
+
+    for role, msg in zip(roles, messages):
+        if role.upper() == "ASSISTANT":
+            input_messages.append(msg + OUTPUT_POSTFIX)
+        elif role.upper() == "USER":
+            input_messages.append(INST_PREFIX + msg + INST_POSTFIX + OUTPUT_PREFIX)
+
+    tokenized_input = tokenizer(input_messages, add_special_tokens=False)
+
+    input_ids = []
+    labels = []
+
+    if roles[0].upper() == "SYSTEM":
+        input_ids.extend(tokenized_input.input_ids[0])
+        labels.extend([-100]*len(tokenized_input.input_ids[0]))
+
+    for role, msg in zip(roles, tokenized_input.input_ids):
+
+        if role.upper() == "USER":
+            labels.extend([-100]*len(msg))
+            input_ids.extend(msg)
+        
+        elif role.upper() == "ASSISTANT":
+            labels.extend(msg)
+            input_ids.extend(msg)
+
+
+    input_ids = torch.LongTensor(input_ids)[:cutoff_len]
+    labels = torch.LongTensor(labels)[:cutoff_len]
+
+    assert input_ids.shape == labels.shape
+
+    return {
+        "input_ids": input_ids,
+        "labels": labels
+    }
 
 def train(
     # model/data params
@@ -104,14 +151,6 @@ def train(
     ), "Please specify a --base_model, e.g. --base_model='huggyllama/llama-7b'"
     gradient_accumulation_steps = batch_size // micro_batch_size
 
-    prompter = Prompter(prompt_template_name)
-
-    print("This is example prompter", prompter.generate_prompt(
-        instruction= "This is Instruction",
-        input= "This is Input",
-        label= "This is Label"
-    ))
-
     device_map = "auto"
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     ddp = world_size != 1
@@ -146,103 +185,6 @@ def train(
         0  # unk. we want this to be different from the eos token
     )
     tokenizer.padding_side = "left"  # Allow batched inference
-
-    def tokenize(prompt, add_eos_token=True):
-        # there's probably a way to do this with the tokenizer settings
-        # but again, gotta move fast
-        result = tokenizer(
-            prompt,
-            truncation=True,
-            max_length=cutoff_len,
-            padding=False,
-            return_tensors=None,
-        )
-        if (
-            result["input_ids"][-1] != tokenizer.eos_token_id
-            and len(result["input_ids"]) < cutoff_len
-            and add_eos_token
-        ):
-            result["input_ids"].append(tokenizer.eos_token_id)
-            result["attention_mask"].append(1)
-
-        result["labels"] = result["input_ids"].copy()
-
-        return result
-
-    def preprocess(data_point):
-        dialog = data_point['dialog']
-
-        roles = [msg["role"] for msg in dialog]
-        messages = [msg["content"] for msg in dialog]
-
-        assert roles[0].upper() != "ASSISTANT"
-        assert roles[-1].upper() == "ASSISTANT"
-
-        input_messages = []
-        if roles[0].upper() == "SYSTEM":
-            input_messages.append(SYS_PREFIX+messages[0]+SYS_POSTFIX)
-
-        for role, msg in zip(roles, messages):
-            if role.upper() == "ASSISTANT":
-                input_messages.append(msg + OUTPUT_POSTFIX)
-            elif role.upper() == "USER":
-                input_messages.append(INST_PREFIX + msg + INST_POSTFIX + OUTPUT_PREFIX)
-
-        tokenized_input = tokenizer(input_messages, add_special_tokens=False)
-
-        input_ids = []
-        labels = []
-
-        if roles[0].upper() == "SYSTEM":
-            input_ids.extend(tokenized_input.input_ids[0])
-            labels.extend([-100]*len(tokenized_input.input_ids[0]))
-
-        for role, msg in zip(roles, tokenized_input.input_ids):
-
-            if role.upper() == "USER":
-                labels.extend([-100]*len(msg))
-                input_ids.extend(msg)
-            
-            elif role.upper() == "ASSISTANT":
-                labels.extend(msg)
-                input_ids.extend(msg)
-
-
-        input_ids = torch.LongTensor(input_ids)[:cutoff_len]
-        labels = torch.LongTensor(labels)[:cutoff_len]
-
-        assert input_ids.shape == labels.shape
-
-        return {
-            "input_ids": input_ids,
-            "labels": labels
-        }
-
-    def generate_and_tokenize_prompt(data_point):
-        full_prompt = prompter.generate_prompt(
-            data_point["instruction"],
-            data_point["input"],
-            data_point["output"],
-        )
-        tokenized_full_prompt = tokenize(full_prompt)
-        if not train_on_inputs:
-            user_prompt = prompter.generate_prompt(
-                data_point["instruction"], data_point["input"]
-            )
-            tokenized_user_prompt = tokenize(
-                user_prompt, add_eos_token=add_eos_token
-            )
-            user_prompt_len = len(tokenized_user_prompt["input_ids"])
-
-            if add_eos_token:
-                user_prompt_len -= 1
-
-            tokenized_full_prompt["labels"] = [
-                -100
-            ] * user_prompt_len + tokenized_full_prompt["labels"][
-                user_prompt_len:
-            ]  # could be sped up, probably
-        return tokenized_full_prompt
 
     if train_lora:
         model = prepare_model_for_int8_training(model)
@@ -346,7 +288,7 @@ def train(
         print("Start test", test_path)
         test_data = read_json(test_path)
         model.eval()
-        evaluate_model(
+        evaluate_non_chat_task(
             data=test_data,
             model=model,
             tokenizer=tokenizer
@@ -375,9 +317,22 @@ def write_json(path, obj):
 
 
 def generate_response(prompt, model, tokenizer):
-    encoding = tokenizer(prompt, padding=True, truncation=True, return_tensors="pt", max_length = 1024)
+    encoding = tokenizer(prompt, padding=True, truncation=True, return_tensors="pt", max_length = 1500)
     input_ids = encoding["input_ids"].to(model.device)
     attention_mask = encoding['attention_mask'].to(model.device)
+
+    min_idx = 10000
+    for ids in input_ids:
+        r = (ids==tokenizer.pad_token_id).nonzero(as_tuple=True)[0]
+        if len(r) == 0:
+          min_idx = 0
+          break
+
+        max_idx = max(r)
+        min_idx = min(max_idx, min_idx)
+
+    input_ids = input_ids[:,min_idx:]
+    attention_mask = attention_mask[:,min_idx:]
 
     generation_config = GenerationConfig(
         temperature=0.1,
@@ -404,12 +359,12 @@ def create_prompt(item):
 def format_response(response, tokenizer):
     if response.sequences.size(0) == 1:
         decoded_output = tokenizer.decode(response.sequences[0], skip_special_tokens = True)
-        response = decoded_output.split(OUTPUT_PREFIX)[1].strip()
+        response = decoded_output.split(OUTPUT_PREFIX)[-1].strip()
     else:
         decoded_outputs = tokenizer.batch_decode(response.sequences, skip_special_tokens=True)
         response = []
         for o in decoded_outputs:
-            response.append(o.split(OUTPUT_PREFIX)[1].strip())
+            response.append(o.split(OUTPUT_PREFIX)[-1].strip())
     return response
 
 def ask_alpaca(prompt, model, tokenizer):
@@ -417,7 +372,7 @@ def ask_alpaca(prompt, model, tokenizer):
     response = format_response(response, tokenizer)
     return response
 
-def evaluate_model(data, model, tokenizer, batch_size = 4):
+def evaluate_non_chat_task(data, model, tokenizer, task_name, batch_size = 4):
     references = [d['output'] for d in data]
     
     predictions = []
@@ -435,7 +390,7 @@ def evaluate_model(data, model, tokenizer, batch_size = 4):
     for idx in range(len(data)):
         data[idx]['prediction'] = predictions[idx]
 
-    write_json("test_result.json", data)
+    write_json(f"{task_name}_result.json", data)
 
     return data
 
