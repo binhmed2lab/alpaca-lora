@@ -316,8 +316,8 @@ def write_json(path, obj):
         outfile.write(json_object)
 
 
-def generate_response(prompt, model, tokenizer):
-    encoding = tokenizer(prompt, padding=True, truncation=True, return_tensors="pt", max_length = 1500)
+def generate_response(prompt, model, tokenizer, max_length = 1500):
+    encoding = tokenizer(prompt, padding=True, truncation=True, return_tensors="pt", max_length = max_length)
     input_ids = encoding["input_ids"].to(model.device)
     attention_mask = encoding['attention_mask'].to(model.device)
 
@@ -359,7 +359,8 @@ def create_prompt(item):
 def format_response(response, tokenizer):
     if response.sequences.size(0) == 1:
         decoded_output = tokenizer.decode(response.sequences[0], skip_special_tokens = True)
-        response = decoded_output.split(OUTPUT_PREFIX)[-1].strip()
+        response = [decoded_output.split(OUTPUT_PREFIX)[-1].strip()]
+        # put to list to make it compatible
     else:
         decoded_outputs = tokenizer.batch_decode(response.sequences, skip_special_tokens=True)
         response = []
@@ -367,8 +368,8 @@ def format_response(response, tokenizer):
             response.append(o.split(OUTPUT_PREFIX)[-1].strip())
     return response
 
-def ask_alpaca(prompt, model, tokenizer):
-    response = generate_response(prompt, model, tokenizer)
+def ask_alpaca(prompt, model, tokenizer, max_length = 1500):
+    response = generate_response(prompt, model, tokenizer, max_length = max_length)
     response = format_response(response, tokenizer)
     return response
 
