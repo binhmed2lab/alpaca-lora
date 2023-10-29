@@ -130,7 +130,7 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
         )
         analyzed_result = package['response']
         usage = package['usage']
-        total_usage['completion_tokens'] += usage['total_usage']
+        total_usage['completion_tokens'] += usage['completion_tokens']
         total_usage['prompt_tokens'] += usage['prompt_tokens']
 
         d['analyzed_result'] = analyzed_result
