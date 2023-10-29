@@ -177,7 +177,8 @@ def validate(
     max_length: int = 1500,
     batch_size: int = 4,
     openaikey: str = None,
-    gpt_model: str = "gpt-3.5-turbo"
+    gpt_model: str = "gpt-3.5-turbo",
+    test_limit: int = -1
 ):
     import openai
     openai.api_key = openaikey
@@ -213,7 +214,8 @@ def validate(
         data_name=data_name,
         batch_size=batch_size,
         max_length = max_length,
-        gpt_model = gpt_model
+        gpt_model = gpt_model,
+        test_limit = test_limit
     )
     
 
