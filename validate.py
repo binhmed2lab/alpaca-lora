@@ -83,17 +83,23 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
         if roles[0].upper() == "SYSTEM":
             prompt += f"{SYS_PREFIX}{messages[0]}{SYS_POSTFIX}"
 
+        prev_role = roles[0].upper()
+
         for dialog_pos, (role, msg) in enumerate(zip(roles, messages)):
             if role.upper() == "ASSISTANT":
-                predict_items.append({
-                    "prompt": prompt,
-                    "answer": msg,
-                    "item_id": item_id,
-                    "dialog_position": dialog_pos
-                })
+                if prev_role == "USER":
+                    predict_items.append({
+                        "prompt": prompt,
+                        "answer": msg,
+                        "item_id": item_id,
+                        "dialog_position": dialog_pos
+                    })
                 prompt += f"{msg}{OUTPUT_POSTFIX}"
             elif role.upper() == "USER":
                 prompt += f"{INST_PREFIX}{msg}{INST_POSTFIX}{OUTPUT_PREFIX}"
+
+            prev_role = role.upper()
+
 
     prompts = [p['prompt'] for p in predict_items]
     results = batch_inference(prompts, model, tokenizer, batch_size = batch_size, max_length = max_length)
