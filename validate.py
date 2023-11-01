@@ -69,8 +69,12 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
     data = [data[idx] for idx, d in enumerate(dialogs_ids) if len(d) < max_length]
     tt = len(data)
     print(f"Remove {t-tt} items > {max_length} lengths. Has {tt} items left")
-    if isinstance(test_limit, float) and test_limit > 0:
-        data = data[:int(len(data) * test_limit)]
+    if isinstance(test_limit, float):
+        if test_limit < 1 and test_limit > 0:
+            data = data[:int(len(data) * test_limit)]
+        elif test_limit > 1:
+            data = data[:test_limit]
+            
         print(f"Test limit of {test_limit}, remaining {len(data)}")
 
 
