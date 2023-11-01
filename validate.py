@@ -59,7 +59,7 @@ def get_dialog_string(dialog):
     return prompt
 
 def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, batch_size = 6, max_length = 1500, test_limit = -1):
-    if isinstance(test_limit, int) and test_limit > -1:
+    if isinstance(test_limit, float) and test_limit > -1:
         data = data[:test_limit]
 
     t = len(data)
@@ -69,6 +69,10 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
     data = [data[idx] for idx, d in enumerate(dialogs_ids) if len(d) < max_length]
     tt = len(data)
     print(f"Remove {t-tt} items > {max_length} lengths. Has {tt} items left")
+    if isinstance(test_limit, float) and test_limit > 0:
+        data = data[:int(len(data) * test_limit)]
+        print(f"Test limit of {test_limit}, remaining {len(data)}")
+
 
     print("Start validating:", data_name)
     predict_items = []
@@ -184,7 +188,7 @@ def validate(
     batch_size: int = 4,
     openaikey: str = None,
     gpt_model: str = "gpt-3.5-turbo",
-    test_limit: int = -1
+    test_limit: float = -1,
 ):
     import openai
     openai.api_key = openaikey
