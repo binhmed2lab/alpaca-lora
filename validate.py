@@ -59,8 +59,6 @@ def get_dialog_string(dialog):
     return prompt
 
 def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, batch_size = 6, max_length = 1500, test_limit = -1):
-    if isinstance(test_limit, float) and test_limit > -1:
-        data = data[:test_limit]
 
     t = len(data)
     dialog_strings = [get_dialog_string(d['dialog']) for d in data]
