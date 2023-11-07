@@ -118,7 +118,7 @@ def train(
     num_epochs: int = 3,
     learning_rate: float = 3e-4,
     cutoff_len: int = 256,
-    val_set_size: int = 2000,
+    val_set_size: float = 0.3,
     # lora hyperparams
     train_lora: bool = True,
     lora_r: int = 8,
@@ -173,7 +173,7 @@ def train(
     gradient_accumulation_steps = batch_size // micro_batch_size
 
     device_map = "auto"
-    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    world_size = torch.cuda.device_count()
     ddp = world_size != 1
     if ddp:
         device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)}
@@ -224,7 +224,9 @@ def train(
     data = read_json(data_path)
     data = transformer_to_dialog(math_data=data)
     data = Dataset.from_dict({"dialog": data})
-    
+    if val_set_size > 1:
+        val_set_size = 0.3
+    val_set_size = int(val_set_size * len(data))
     train_val = data.train_test_split(
         test_size=val_set_size, shuffle=True, seed=42
     )
@@ -241,6 +243,10 @@ def train(
         model.is_parallelizable = True
         model.model_parallel = True
 
+    total_steps = num_epochs * len(train_data) // batch_size
+    logging_steps = int(0.1 * total_steps)
+    eval_steps = total_steps // num_epochs
+
     trainer = transformers.Trainer(
         model=model,
         train_dataset=train_data,
@@ -248,18 +254,18 @@ def train(
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=100,
+            warmup_steps=0,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
             fp16=True,
-            logging_steps=10,
+            logging_steps=logging_steps,
             optim="adamw_torch",
             evaluation_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="steps",
-            eval_steps=200 if val_set_size > 0 else None,
-            save_steps=200,
+            eval_steps=eval_steps if val_set_size > 0 else None,
+            save_steps=eval_steps,
             output_dir=output_dir,
-            save_total_limit=3,
+            save_total_limit=1,
             load_best_model_at_end=True if val_set_size > 0 else False,
             ddp_find_unused_parameters=False if ddp else None,
             group_by_length=group_by_length,
