@@ -34,7 +34,8 @@ OUTPUT_PREFIX = "[/INST] "
 OUTPUT_POSTFIX = "</s>"
 
 def preprocess(data_point):
-    global tokenizer, cutoff_len
+    global tokenizer
+    cutoff_len = 1280
     dialog = data_point['dialog']
 
     roles = [msg["role"] for msg in dialog]
@@ -178,7 +179,7 @@ def train(
         torch_dtype=torch.float16,
         device_map=device_map,
     )
-
+    global tokenizer
     tokenizer = LlamaTokenizer.from_pretrained(base_model)
 
     tokenizer.pad_token_id = (
