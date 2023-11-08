@@ -247,6 +247,10 @@ def train(
         model.is_parallelizable = True
         model.model_parallel = True
 
+    total_steps = num_epochs * len(train_data) // batch_size
+    logging_steps = int(0.1 * total_steps)
+    eval_steps = total_steps // num_epochs
+
     trainer = transformers.Trainer(
         model=model,
         train_dataset=train_data,
@@ -254,16 +258,16 @@ def train(
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=100,
+            warmup_steps=0,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
             fp16=True,
-            logging_steps=10,
+            logging_steps=logging_steps,
             optim="adamw_torch",
             evaluation_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="steps",
-            eval_steps=200 if val_set_size > 0 else None,
-            save_steps=200,
+            eval_steps=eval_steps if val_set_size > 0 else None,
+            save_steps=eval_steps,
             output_dir=output_dir,
             save_total_limit=3,
             load_best_model_at_end=True if val_set_size > 0 else False,
