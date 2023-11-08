@@ -119,6 +119,7 @@ def train(
     learning_rate: float = 3e-4,
     cutoff_len: int = 256,
     val_set_size: float = 0.3,
+    max_grad_norm: float = 0.3,
     # lora hyperparams
     train_lora: bool = True,
     lora_r: int = 8,
@@ -206,7 +207,7 @@ def train(
     tokenizer.pad_token_id = (
         0  # unk. we want this to be different from the eos token
     )
-    # tokenizer.padding_side = "left"  # Allow batched inference
+    tokenizer.padding_side = "right"  # Allow batched inference
 
     model = prepare_model_for_int8_training(model)
 
@@ -258,6 +259,7 @@ def train(
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
             fp16=True,
+            max_grad_norm = max_grad_norm,
             logging_steps=logging_steps,
             optim="adamw_torch",
             evaluation_strategy="steps" if val_set_size > 0 else "no",
