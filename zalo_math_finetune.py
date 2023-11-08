@@ -120,6 +120,9 @@ def train(
     cutoff_len: int = 256,
     val_set_size: float = 0.3,
     max_grad_norm: float = 0.3,
+    warmup_ratio: float = 0.03,
+    weight_decay: float = 0.01,
+    optim: str = "paged_adamw_32bit",
     # lora hyperparams
     train_lora: bool = True,
     lora_r: int = 8,
@@ -255,13 +258,14 @@ def train(
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=0,
+            warmup_ratio=warmup_ratio,
+            weight_decay = weight_decay,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
             fp16=True,
             max_grad_norm = max_grad_norm,
             logging_steps=logging_steps,
-            optim="adamw_torch",
+            optim=optim, # adamw_torch
             evaluation_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="steps",
             eval_steps=eval_steps if val_set_size > 0 else None,
