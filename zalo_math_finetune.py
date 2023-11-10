@@ -155,8 +155,6 @@ def get_dialog_string(dialog):
 
     return prompt
 
-
-
 def train(
     # model/data params
     base_model: str = "",  # the only required argument
@@ -200,6 +198,8 @@ def train(
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
     prompt_template_name: str = "alpaca",  # The prompt template to use, will default to alpaca.
     wandb_api_key: str = None, # Wandb api key
+    huggingface_token: str = None, # token to login huggingface
+    huggingface_repo: str = None, # push to repo
 ):
     
     gradient_accumulation_steps = batch_size // micro_batch_size
@@ -327,6 +327,13 @@ def train(
 
     model.save_pretrained(output_dir)
 
+    if isinstance(huggingface_token, str) and isinstance(huggingface_repo,str):
+        from huggingface_hub import login
+        login(token = huggingface_token)
+        model.push_to_hub(
+            huggingface_repo
+        )
+        
     # Start to Evaluate Data
     model.eval()
 
