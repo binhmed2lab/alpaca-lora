@@ -1,10 +1,10 @@
-accelerate
+accelerate==0.21.0
 appdirs
 loralib
 bitsandbytes
 black
 black[jupyter]
-datasets
+datasets==2.10.1
 fire
 git+https://github.com/huggingface/peft.git
 transformers>=4.28.0
@@ -12,3 +12,8 @@ sentencepiece
 gradio
 openai==0.27.4
 backoff==2.2.1
+sacrebleu
+gdown
+scipy
+openai
+wandb

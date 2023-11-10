@@ -18,7 +18,7 @@ from peft import (
     prepare_model_for_int8_training,
     set_peft_model_state_dict,
 )
-from transformers import LlamaForCausalLM, LlamaTokenizer
+from transformers import LlamaForCausalLM, LlamaTokenizer, AutoModelForCausalLM
 
 SYS_PREFIX = "<<SYS>>\n"
 SYS_POSTFIX = "\n<</SYS>>\n\n"
@@ -200,7 +200,7 @@ def train(
 
     wandb.login(key=wandb_api_key)
 
-    model = LlamaForCausalLM.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         base_model,
         load_in_8bit=True,
         torch_dtype=torch.float16,

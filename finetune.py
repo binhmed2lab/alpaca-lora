@@ -247,8 +247,9 @@ def train(
         model.is_parallelizable = True
         model.model_parallel = True
 
-    total_steps = num_epochs * len(train_data) // batch_size
-    logging_steps = int(0.1 * total_steps)
+    epoch_steps =  len(train_data) // batch_size
+    total_steps = num_epochs * epoch_steps
+    logging_steps = int(0.1 * epoch_steps)
     eval_steps = total_steps // num_epochs
 
     trainer = transformers.Trainer(
