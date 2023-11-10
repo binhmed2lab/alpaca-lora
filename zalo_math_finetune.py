@@ -22,6 +22,8 @@ from peft import (
 )
 from transformers import LlamaForCausalLM, AutoTokenizer, AutoModelForCausalLM
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 SYS_PREFIX = "<<SYS>>\n"
 SYS_POSTFIX = "\n<</SYS>>\n\n"
 INST_PREFIX = "<s>[INST] "
@@ -224,7 +226,7 @@ def train(
 
     wandb.login(key=wandb_api_key)
 
-    model = AutoModelForCausalLM.from_pretrained(
+    model = LlamaForCausalLM.from_pretrained(
         base_model,
         load_in_8bit=True,
         torch_dtype=torch.float16,
