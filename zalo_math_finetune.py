@@ -105,15 +105,13 @@ def transformer_to_dialog(math_data):
         ]
         if explanation:
             dialog += [
-            {"role": "user", "content": f"Câu hỏi: {question}\nViết lời giải của bạn."},
-            {"role": "assistant", "content": explanation},
-            {"role": "user", "content": f"Dựa theo lời giải của bạn, thì lựa chọn nào sau đây là chính xác:{choices}"},
-            {"role": "assistant", "content": answer}
+            {"role": "user", "content": f"Câu hỏi: {question}\nLựa chọn: {choices}. Viết lời giải của bạn, sau đó đưa ra lựa chọn."},
+            {"role": "assistant", "content": f"Lời giải: {explanation}\nKết quả: {answer}"}
             ]
         else:
             dialog += [
             {"role": "user", "content": f"Câu hỏi: {question}\nLựa chọn nào sau đây là chính xác:{choices}"},
-            {"role": "assistant", "content": answer}
+            {"role": "assistant", "content": f"Kết quả: {answer}"}
             ]
 
         dialogs.append(dialog)
@@ -126,14 +124,10 @@ def transformer_for_test(data):
     question = d['question']
     choices = d['choices']
     choices = "\n".join(choices)
-    answer = ""
-    explanation = ""
     dialog = [
         {"role": "system", "content": "Bạn đang trong 1 cuộc thi toán tiểu học. Xin hãy trả lời bằng tiếng Việt."},
-        {"role": "user", "content": f"Câu hỏi: {question}\nViết lời giải của bạn."},
-        {"role": "assistant", "content": explanation},
-        {"role": "user", "content": f"Dựa theo lời giải của bạn, thì lựa chọn nào sau đây là chính xác:{choices}"},
-        {"role": "assistant", "content": answer}
+        {"role": "user", "content": f"Câu hỏi: {question}\nLựa chọn: {choices}. Viết lời giải của bạn, sau đó đưa ra lựa chọn."},
+        {"role": "assistant", "content": ""}
     ]
     dialogs.append(dialog)
 
