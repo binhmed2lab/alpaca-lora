@@ -18,9 +18,10 @@ from peft import (
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
-from transformers import LlamaForCausalLM, AutoTokenizer, AutoModelForCausalLM
+from transformers import LlamaForCausalLM, AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -171,7 +172,7 @@ def train(
     adam_epsilon: float = 1e-8,
     optim: str = "paged_adamw_32bit",
     # lora hyperparams
-    train_lora: bool = True,
+    train_qlora: bool = True,
     lora_r: int = 8,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
@@ -220,13 +221,6 @@ def train(
 
     wandb.login(key=wandb_api_key)
 
-    model = LlamaForCausalLM.from_pretrained(
-        base_model,
-        load_in_8bit=True,
-        torch_dtype=torch.float16,
-        device_map=device_map,
-    )
-
     global tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model)
 
@@ -234,19 +228,43 @@ def train(
         0  # unk. we want this to be different from the eos token
     )
     tokenizer.padding_side = "left"  # Allow batched inference
-    if train_lora is True:
-        model = prepare_model_for_int8_training(model)
-
-        config = LoraConfig(
-            r=lora_r,
-            lora_alpha=lora_alpha,
-            target_modules=lora_target_modules,
-            lora_dropout=lora_dropout,
-            bias="none",
-            task_type="CAUSAL_LM",
+    if train_qlora is True:
+        optim="paged_adamw_8bit"
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
         )
-        model = get_peft_model(model, config)
-        model.print_trainable_parameters()
+
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model,
+            device_map=device_map,
+            trust_remote_code=True,
+            quantization_config=bnb_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+
+    else:
+        model = LlamaForCausalLM.from_pretrained(
+            base_model,
+            load_in_8bit=True,
+            torch_dtype=torch.float16,
+            device_map=device_map,
+        )
+        model = prepare_model_for_kbit_training(model)
+
+    config = LoraConfig(
+        r=lora_r,
+        lora_alpha=lora_alpha,
+        target_modules=lora_target_modules,
+        lora_dropout=lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, config)
+
+    model.print_trainable_parameters()
 
     data = read_json(data_path)['data']
     random.shuffle(data)
@@ -292,6 +310,7 @@ def train(
             adam_beta1=adam_beta1,
             adam_beta2=adam_beta2,
             adam_epsilon=adam_epsilon,
+            lr_scheduler_type="cosine",
             fp16=True,
             max_grad_norm = max_grad_norm,
             logging_steps=logging_steps,
