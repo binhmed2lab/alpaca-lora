@@ -278,10 +278,10 @@ def train(
     train_dialogs = transformer_to_dialog(math_data=train_data)
     val_dialogs = transformer_to_dialog(math_data=val_data)
 
-    train_data = (
+    train_ds = (
         Dataset.from_dict({"dialog": train_dialogs}).shuffle().map(preprocess)
     )
-    val_data = (
+    val_ds = (
         Dataset.from_dict({"dialog": val_dialogs}).map(preprocess)
     )
 
@@ -297,8 +297,8 @@ def train(
 
     trainer = transformers.Trainer(
         model=model,
-        train_dataset=train_data,
-        eval_dataset=val_data,
+        train_dataset=train_ds,
+        eval_dataset=val_ds,
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             per_device_eval_batch_size=micro_batch_size,
@@ -336,16 +336,16 @@ def train(
     if torch.__version__ >= "2" and sys.platform != "win32":
         model = torch.compile(model)
 
-    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    # trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
-    model.save_pretrained(output_dir)
+    # model.save_pretrained(output_dir)
 
-    if isinstance(huggingface_token, str) and isinstance(huggingface_repo,str):
-        from huggingface_hub import login
-        login(token = huggingface_token)
-        model.push_to_hub(
-            huggingface_repo
-        )
+    # if isinstance(huggingface_token, str) and isinstance(huggingface_repo,str):
+    #     from huggingface_hub import login
+    #     login(token = huggingface_token)
+    #     model.push_to_hub(
+    #         huggingface_repo
+    #     )
         
     # Start to Evaluate Data
     model.eval()
@@ -370,9 +370,8 @@ def train(
     df.to_csv("zalo_submission.csv", index=False)
 
 
-
 def read_json(path):
-    f = open(path)
+    f = open(path, encoding = "utf8")
     data = json.load(f)
     f.close()
     return data
@@ -462,8 +461,9 @@ def get_results(test_data, test_dialogs):
     return rows
 
 def ValidateFunc(model, tokenizer, test_path = None, test_data = None, batch_size = 8):
-    if test_data is None:
+    if test_data is None and test_path is not None:
         test_data = read_json(test_path)['data']
+
     test_dialogs = transformer_for_test(test_data)
 
     run_dialogs = test_dialogs
