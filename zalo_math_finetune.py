@@ -347,13 +347,15 @@ def train(
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
     model.save_pretrained(output_dir)
-
-    if isinstance(huggingface_token, str) and isinstance(huggingface_repo,str):
-        from huggingface_hub import login
-        login(token = huggingface_token)
-        model.push_to_hub(
-            huggingface_repo
-        )
+    try:
+        if isinstance(huggingface_token, str) and isinstance(huggingface_repo,str):
+            from huggingface_hub import login
+            login(token = huggingface_token)
+            model.push_to_hub(
+                huggingface_repo
+            )
+    except:
+        pass
         
     # Start to Evaluate Data
     model.eval()
