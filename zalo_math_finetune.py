@@ -11,7 +11,7 @@ import fire
 import torch
 import transformers
 from transformers import GenerationConfig
-from datasets import Dataset
+from datasets import Dataset, load_metric
 
 from peft import (
     LoraConfig,
@@ -295,10 +295,18 @@ def train(
     logging_steps = int(0.1 * total_steps)
     eval_steps = total_steps // num_epochs
 
+    perplexity = load_metric("perplexity")
+    def compute_metrics(eval_preds):
+        predictions, labels = eval_preds
+        predictions = np.argmax(predictions, axis=1)
+        perplexity_val = perplexity.compute(predictions=predictions, references=labels)
+        return {"perplexity": perplexity_val}
+
     trainer = transformers.Trainer(
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
+        compute_metrics=compute_metrics,
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             per_device_eval_batch_size=micro_batch_size,
@@ -336,16 +344,16 @@ def train(
     if torch.__version__ >= "2" and sys.platform != "win32":
         model = torch.compile(model)
 
-    # trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
-    # model.save_pretrained(output_dir)
+    model.save_pretrained(output_dir)
 
-    # if isinstance(huggingface_token, str) and isinstance(huggingface_repo,str):
-    #     from huggingface_hub import login
-    #     login(token = huggingface_token)
-    #     model.push_to_hub(
-    #         huggingface_repo
-    #     )
+    if isinstance(huggingface_token, str) and isinstance(huggingface_repo,str):
+        from huggingface_hub import login
+        login(token = huggingface_token)
+        model.push_to_hub(
+            huggingface_repo
+        )
         
     # Start to Evaluate Data
     model.eval()
