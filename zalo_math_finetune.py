@@ -360,16 +360,16 @@ def train(
     # Start to Evaluate Data
     model.eval()
 
-    eval_rows = ValidateFunc(model=model,
-                             tokenizer=tokenizer,
-                             test_data=val_data,
-                             batch_size=eval_batch_size)
-    cnt = 0
-    total = len(eval_rows)
-    for eval_row, eval_item in zip(eval_rows, val_data):
-        cnt += eval_row['answer'] == eval_item['answer']
+    # eval_rows = ValidateFunc(model=model,
+    #                          tokenizer=tokenizer,
+    #                          test_data=val_data,
+    #                          batch_size=eval_batch_size)
+    # cnt = 0
+    # total = len(eval_rows)
+    # for eval_row, eval_item in zip(eval_rows, val_data):
+    #     cnt += eval_row['answer'] == eval_item['answer']
 
-    print(f"Eval Accuracy: {100 * cnt / total:.2f}")
+    # print(f"Eval Accuracy: {100 * cnt / total:.2f}")
     # Test data
     test_rows = ValidateFunc(model=model,
                              tokenizer=tokenizer,
