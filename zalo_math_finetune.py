@@ -41,9 +41,7 @@ def seed_everything(seed=42):
     torch.backends.cudnn.deterministic = True
 
 
-def preprocess(data_point):
-    global tokenizer
-    cutoff_len = 1280
+def preprocess(data_point, tokenizer, cutoff_len):
     dialog = data_point['dialog']
 
     roles = [msg["role"] for msg in dialog]
@@ -58,7 +56,7 @@ def preprocess(data_point):
 
     for role, msg in zip(roles, messages):
         if role.upper() == "ASSISTANT":
-            input_messages.append(msg + OUTPUT_POSTFIX)
+            input_messages.append(msg + " " + OUTPUT_POSTFIX)
         elif role.upper() == "USER":
             input_messages.append(INST_PREFIX + msg + INST_POSTFIX + OUTPUT_PREFIX)
 
@@ -144,9 +142,9 @@ def get_dialog_string(dialog):
 
     for role, msg in zip(roles, messages):
         if role.upper() == "ASSISTANT":
-            prompt += f"{msg}{OUTPUT_POSTFIX}"
+            prompt += f" {msg} {OUTPUT_POSTFIX}"
         elif role.upper() == "USER":
-            prompt += f"{INST_PREFIX}{msg}{INST_POSTFIX}{OUTPUT_PREFIX}"
+            prompt += f" {INST_PREFIX}{msg}{INST_POSTFIX}{OUTPUT_PREFIX}"
 
     return prompt
 
@@ -279,11 +277,11 @@ def train(
     val_dialogs = transformer_to_dialog(math_data=val_data)
 
     train_ds = (
-        Dataset.from_dict({"dialog": train_dialogs}).shuffle().map(preprocess)
-    )
+        Dataset.from_dict({"dialog": train_dialogs}).shuffle().map(lambda x: preprocess(x, tokenizer, cutoff_len))
+    ).filter(lambda x: len(x['input_ids']) < cutoff_len)
     val_ds = (
-        Dataset.from_dict({"dialog": val_dialogs}).map(preprocess)
-    )
+        Dataset.from_dict({"dialog": val_dialogs}).map(lambda x: preprocess(x, tokenizer, cutoff_len))
+    ).filter(lambda x: len(x['input_ids']) < cutoff_len)
 
 
     if not ddp and torch.cuda.device_count() > 1:
@@ -494,7 +492,7 @@ def ValidateFunc(model, tokenizer, test_path = None, test_data = None, batch_siz
                     sub_cnt += 1
 
         prompts = [get_dialog_string(d) for d in datas]
-        responses = batch_inference(prompts, model, tokenizer, batch_size=batch_size)
+        responses = batch_inference(prompts, model, tokenizer, batch_size=1)
         for idx, dialog, response in zip(indices, _run_dialogs, responses):
             dialog[idx]['content'] = response
 
