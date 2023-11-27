@@ -461,10 +461,12 @@ def get_results(test_data, test_dialogs):
             if any(i in dialog[-1]['content'] for i in d):
                 answer = choices[idx]
 
-        rows.append({"id": id, "answer": answer})
+        
         if answer is None:
             rows.append({"id": id, "answer": choices[0]}) # if can't find
             print(id, dialog[-1]['content'])
+        else:
+            rows.append({"id": id, "answer": answer})
 
     return rows
 
