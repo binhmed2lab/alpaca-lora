@@ -25,9 +25,9 @@ from transformers import LlamaForCausalLM, AutoTokenizer, AutoModelForCausalLM, 
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-SYS_PREFIX = "<<SYS>>\n"
-SYS_POSTFIX = "\n<</SYS>>\n\n"
-INST_PREFIX = "<s>[INST] "
+SYS_PREFIX = "<<SYS>>"
+SYS_POSTFIX = " <</SYS>> "
+INST_PREFIX = "<s> [INST] "
 INST_POSTFIX = " "
 OUTPUT_PREFIX = "[/INST] "
 OUTPUT_POSTFIX = "</s>"
@@ -125,8 +125,7 @@ def transformer_for_test(data):
     choices = "\n".join(choices)
     dialog = [
         {"role": "system", "content": "Bạn đang trong 1 cuộc thi toán tiểu học. Xin hãy trả lời bằng tiếng Việt."},
-        {"role": "user", "content": f"Câu hỏi: {question}\nLựa chọn: {choices}. Viết lời giải của bạn, sau đó đưa ra lựa chọn."},
-        {"role": "assistant", "content": ""}
+        {"role": "user", "content": f"Câu hỏi: {question}\nLựa chọn: {choices}. Viết lời giải của bạn, sau đó đưa ra lựa chọn."}
     ]
     dialogs.append(dialog)
 
@@ -219,7 +218,6 @@ def train(
 
     wandb.login(key=wandb_api_key)
 
-    global tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model)
 
     tokenizer.pad_token_id = (
@@ -279,6 +277,7 @@ def train(
     train_ds = (
         Dataset.from_dict({"dialog": train_dialogs}).shuffle().map(lambda x: preprocess(x, tokenizer, cutoff_len))
     ).filter(lambda x: len(x['input_ids']) < cutoff_len)
+
     val_ds = (
         Dataset.from_dict({"dialog": val_dialogs}).map(lambda x: preprocess(x, tokenizer, cutoff_len))
     ).filter(lambda x: len(x['input_ids']) < cutoff_len)
@@ -394,7 +393,11 @@ def write_json(path, obj):
 
 
 def generate_response(prompt, model, tokenizer, max_length = 1500, temperature = 0.1, top_k = 50):
-    encoding = tokenizer(prompt, padding=True, truncation=True, return_tensors="pt", max_length = max_length)
+    encoding = tokenizer(prompt, padding=True, 
+                         truncation=True, 
+                         return_tensors="pt", 
+                         max_length = max_length, 
+                         add_special_tokens=False)
     input_ids = encoding["input_ids"].to(model.device)
     attention_mask = encoding['attention_mask'].to(model.device)
 
@@ -457,14 +460,14 @@ def get_results(test_data, test_dialogs):
         id = data['id']
         choices = data['choices']
         answer = None
+        solution_return = dialog[-1]['content']
         for idx, d in enumerate([('A.', '(A)', 'A:'), ('B.', '(B)', 'B:'), ('C.', '(C)', 'C:'), ('D.', '(D)', 'D:')]):
-            if any(i in dialog[-1]['content'] for i in d):
+            if any(i in solution_return for i in d):
                 answer = choices[idx]
 
-        
         if answer is None:
             rows.append({"id": id, "answer": choices[0]}) # if can't find
-            print(id, dialog[-1]['content'])
+            print(id, solution_return)
         else:
             rows.append({"id": id, "answer": answer})
 
@@ -475,31 +478,14 @@ def ValidateFunc(model, tokenizer, test_path = None, test_data = None, batch_siz
         test_data = read_json(test_path)['data']
 
     test_dialogs = transformer_for_test(test_data)
+    prompts = [get_dialog_string(d) for d in test_dialogs]
+    responses = batch_inference(prompts, model, tokenizer, batch_size=1)
 
-    run_dialogs = test_dialogs
-    run_cnt = 1
-    while len(run_dialogs) != 0:
-        datas = []
-        indices = []
-        _run_dialogs = []
-        for d in run_dialogs:
-            sub_cnt = 1
-            for idx, r in enumerate(d):
-                if r['role'] == "assistant":
-                    if sub_cnt == run_cnt:
-                        datas.append(d[:idx])
-                        indices.append(idx)
-                        _run_dialogs.append(d)
-                        break
-                    sub_cnt += 1
-
-        prompts = [get_dialog_string(d) for d in datas]
-        responses = batch_inference(prompts, model, tokenizer, batch_size=1)
-        for idx, dialog, response in zip(indices, _run_dialogs, responses):
-            dialog[idx]['content'] = response
-
-        run_dialogs = _run_dialogs
-        run_cnt += 1
+    for dialog, response in zip(test_dialogs, responses):
+        dialog.append({
+            "role": "assistant",
+            "content": response
+        })
 
     rows = get_results(test_data, test_dialogs)
     return rows
