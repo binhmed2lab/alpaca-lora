@@ -289,7 +289,7 @@ def train(
         model.is_parallelizable = True
         model.model_parallel = True
 
-    total_steps = num_epochs * len(train_data) // batch_size
+    total_steps = num_epochs * len(train_ds) // batch_size
     logging_steps = int(0.1 * total_steps)
     eval_steps = total_steps // num_epochs
 
