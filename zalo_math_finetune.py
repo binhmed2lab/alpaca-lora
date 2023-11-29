@@ -118,18 +118,18 @@ def transformer_to_dialog(math_data):
     return dialogs
 
 def transformer_for_test(data):
-  dialogs = []
-  for d in data:
-    question = d['question']
-    choices = d['choices']
-    choices = "\n".join(choices)
-    dialog = [
-        {"role": "system", "content": "Bạn đang trong 1 cuộc thi toán tiểu học. Xin hãy trả lời bằng tiếng Việt."},
-        {"role": "user", "content": f"Câu hỏi: {question}\nLựa chọn: {choices}. Viết lời giải của bạn, sau đó đưa ra lựa chọn."}
-    ]
-    dialogs.append(dialog)
+    dialogs = []
+    for d in data:
+        question = d['question']
+        choices = d['choices']
+        choices = "\n".join(choices)
+        dialog = [
+            {"role": "system", "content": "Bạn đang trong 1 cuộc thi toán tiểu học. Xin hãy trả lời bằng tiếng Việt."},
+            {"role": "user", "content": f"Câu hỏi: {question}\nLựa chọn: {choices}. Viết lời giải của bạn, sau đó đưa ra lựa chọn."}
+        ]
+        dialogs.append(dialog)
 
-  return dialogs
+    return dialogs
 
 def get_dialog_string(dialog):
     prompt = ""
@@ -226,6 +226,7 @@ def train(
     tokenizer.eos_token = "</s>"
     tokenizer.eos_token_id = 2
     tokenizer.padding_side = "left"  # Allow batched inference
+
     if train_qlora is True:
         optim="paged_adamw_8bit"
         bnb_config = BitsAndBytesConfig(
@@ -260,6 +261,8 @@ def train(
         )
         model = prepare_model_for_kbit_training(model)
 
+    model.config.eos_token_id = tokenizer.eos_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
     config = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
@@ -416,7 +419,9 @@ def generate_response(prompt, model, tokenizer, max_length = 1500, temperature =
         top_p=1,
         do_sample = True,
         num_beams = 1,
-        top_k = top_k
+        top_k = top_k,
+        pad_token_id = tokenizer.pad_token_id,
+        eos_token_id = tokenizer.eos_token_id
     )
 
     with torch.inference_mode():
