@@ -223,8 +223,8 @@ def train(
     tokenizer.pad_token_id = (
         0  # unk. we want this to be different from the eos token
     )
-    tokenizer.eos_token = "</s>"
-    tokenizer.eos_token_id = 2
+    global OUTPUT_POSTFIX
+    OUTPUT_POSTFIX = tokenizer.eos_token
     tokenizer.padding_side = "left"  # Allow batched inference
 
     if train_qlora is True:
