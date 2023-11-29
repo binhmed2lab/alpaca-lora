@@ -232,13 +232,21 @@ def train(
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
-
-        model = AutoModelForCausalLM.from_pretrained(
-            base_model,
-            device_map=device_map,
-            trust_remote_code=True,
-            quantization_config=bnb_config,
-        )
+        try:
+            model = AutoModelForCausalLM.from_pretrained(
+                base_model,
+                device_map=device_map,
+                trust_remote_code=True,
+                quantization_config=bnb_config,
+            )
+        except:
+            model = AutoModelForCausalLM.from_pretrained(
+                base_model,
+                device_map=device_map,
+                trust_remote_code=True,
+                quantization_config=bnb_config,
+                use_safetensors=True
+            )
         model = prepare_model_for_kbit_training(model)
 
     else:
@@ -320,7 +328,7 @@ def train(
             max_grad_norm = max_grad_norm,
             logging_steps=logging_steps,
             optim=optim, # adamw_torch
-            evaluation_strategy="steps" if val_set_size > 0 else "no",
+            evaluation_strategy="steps",
             save_strategy="steps",
             eval_steps=eval_steps if val_set_size > 0 else None,
             save_steps=eval_steps,
