@@ -425,7 +425,7 @@ def train(
                     lr_scheduler_type="cosine",
                     warmup_ratio=warmup_ratio,
                     optim="paged_adamw_32bit",
-                    bf16=True,
+                    fp16=True,
                     remove_unused_columns=False,
                     run_name="dpo_llama2",
                     weight_decay = weight_decay
