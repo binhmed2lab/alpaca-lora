@@ -12,14 +12,13 @@ import torch
 import transformers
 from transformers import GenerationConfig
 from datasets import Dataset, load_metric
+from trl import DPOTrainer
 
 from peft import (
     LoraConfig,
     get_peft_model,
-    get_peft_model_state_dict,
-    prepare_model_for_int8_training,
     prepare_model_for_kbit_training,
-    set_peft_model_state_dict,
+    AutoPeftModelForCausalLM
 )
 from transformers import LlamaForCausalLM, AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
@@ -152,8 +151,10 @@ def train(
     base_model: str = "",  # the only required argument
     data_path: str = "math_train.json",
     test_path: str = "math_test.json",
+    dpo_path: str = "dpo_data.json",
     output_dir: str = "./lora-alpaca",
     score_eval: bool = False,
+    dpo_finetune: bool = True,
     # training hyperparams
     batch_size: int = 128,
     eval_batch_size: int = 128,
@@ -368,6 +369,71 @@ def train(
     except:
         pass
         
+    if dpo_finetune:
+        raw_dpo_data = read_json(dpo_path)
+        dpo_data = {
+            "prompt": [],
+            "chosen": [],
+            "rejected": []
+        }
+        for d in raw_dpo_data:
+            question = d['question']
+            choices = d['choices']
+            prompt = f"Câu hỏi: {question}\nLựa chọn: {choices}. Viết lời giải của bạn, sau đó đưa ra lựa chọn."
+            dpo_data["prompt"].append(prompt)
+            dpo_data["chosen"].append(d['choice'])
+            dpo_data["rejected"].append(d['reject'])
+
+        dpo_ds = (
+            Dataset.from_dict(dpo_data).shuffle()
+        ).filter(lambda x: len(x['prompt']) + len(x['chosen']) < cutoff_len
+                        and len(x['prompt']) + len(x['rejected']) < cutoff_len)
+        
+        total_steps = num_epochs * len(dpo_ds) // batch_size
+        logging_steps = int(0.1 * total_steps)
+        eval_steps = total_steps // num_epochs
+
+        model_ref = AutoPeftModelForCausalLM.from_pretrained(
+            output_dir,
+            low_cpu_mem_usage=True,
+            torch_dtype=torch.float16,
+            load_in_4bit=True,
+        )
+        model_ref.config.eos_token_id = tokenizer.eos_token_id
+        model_ref.config.pad_token_id = tokenizer.pad_token_id
+
+        dpo_trainer = DPOTrainer(
+            model,                 # base model from SFT pipeline
+            model_ref,             # typically a copy of the SFT trained base model
+            beta=0.1,              # temperature hyperparameter of DPO
+            train_dataset=dpo_ds, # dataset prepared above
+            tokenizer=tokenizer,   # tokenizer
+            max_prompt_length=cutoff_len,
+            max_length=cutoff_len,
+            args=transformers.TrainingArguments(
+                    per_device_train_batch_size=micro_batch_size,
+                    per_device_eval_batch_size=micro_batch_size,
+                    num_train_epochs=num_epochs,
+                    logging_steps=logging_steps,
+                    save_steps=logging_steps,
+                    gradient_accumulation_steps=gradient_accumulation_steps,
+                    learning_rate=5e-4,
+                    evaluation_strategy="steps",
+                    eval_steps=eval_steps,
+                    output_dir=output_dir+"-dpo",
+                    report_to="wandb" if use_wandb else None,
+                    lr_scheduler_type="cosine",
+                    warmup_ratio=warmup_ratio,
+                    optim="paged_adamw_32bit",
+                    bf16=True,
+                    remove_unused_columns=False,
+                    run_name="dpo_llama2",
+                    weight_decay = weight_decay
+            ),    # training arguments e.g. batch size, lr, etc.
+        )
+
+        dpo_trainer.train()
+        dpo_trainer.save_model(output_dir+"-dpo")
     # Start to Evaluate Data
     model.eval()
 

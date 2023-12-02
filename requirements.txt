@@ -1,3 +1,5 @@
+git+https://github.com/huggingface/transformers.git
+git+https://github.com/huggingface/trl.git
 accelerate==0.21.0
 appdirs
 loralib
@@ -6,7 +8,6 @@ black
 black[jupyter]
 datasets==2.10.1
 fire
-git+https://github.com/huggingface/peft.git
 transformers>=4.28.0
 sentencepiece
 gradio
@@ -17,3 +18,4 @@ gdown
 scipy
 openai
 wandb
+git+https://github.com/huggingface/peft.git
