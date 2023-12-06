@@ -217,6 +217,8 @@ def validate(
         0  # unk. we want this to be different from the eos token
     )
     tokenizer.padding_side = "left"  # Allow batched inference
+    global OUTPUT_POSTFIX
+    OUTPUT_POSTFIX = tokenizer.eos_token
     
     ValidateFinetunePerformance(
         model=model,

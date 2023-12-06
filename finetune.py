@@ -20,6 +20,8 @@ import bitsandbytes as bnb
 """
 
 from peft import (
+    LoraConfig,
+    get_peft_model,
     prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
@@ -163,19 +165,14 @@ def train(
 
     wandb.login(key=wandb_api_key)
 
-    model = LlamaForCausalLM.from_pretrained(
-        base_model,
-        load_in_8bit=True,
-        torch_dtype=torch.float16,
-        device_map=device_map,
-    )
-
     tokenizer = AutoTokenizer.from_pretrained(base_model)
 
     tokenizer.pad_token_id = (
         0  # unk. we want this to be different from the eos token
     )
     tokenizer.padding_side = "left"  # Allow batched inference
+    global OUTPUT_POSTFIX
+    OUTPUT_POSTFIX = tokenizer.eos_token
 
     if train_qlora is True:
         optim="paged_adamw_8bit"
@@ -210,6 +207,18 @@ def train(
             device_map=device_map,
         )
         model = prepare_model_for_kbit_training(model)
+
+    model.config.eos_token_id = tokenizer.eos_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
+    config = LoraConfig(
+        r=lora_r,
+        lora_alpha=lora_alpha,
+        target_modules=lora_target_modules,
+        lora_dropout=lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, config)
 
     if data_path.endswith(".json") or data_path.endswith(".jsonl"):
         data = load_dataset("json", data_files=data_path)
@@ -359,7 +368,7 @@ def generate_response(prompt, model, tokenizer, max_length = 1500):
         pad_token_id = tokenizer.pad_token_id,
         eos_token_id = tokenizer.eos_token_id
     )
-    
+
     with torch.inference_mode():
         return model.generate(
             input_ids=input_ids,
