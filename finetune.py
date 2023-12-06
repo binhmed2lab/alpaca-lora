@@ -4,6 +4,8 @@ from typing import List
 import json
 from tqdm import tqdm
 import wandb
+import random
+import numpy as np
 
 import fire
 import torch
@@ -18,24 +20,28 @@ import bitsandbytes as bnb
 """
 
 from peft import (
-    LoraConfig,
-    get_peft_model,
-    get_peft_model_state_dict,
-    prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
-from transformers import LlamaForCausalLM, LlamaTokenizer
+from transformers import LlamaForCausalLM, AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
-SYS_PREFIX = "<<SYS>>\n"
-SYS_POSTFIX = "\n<</SYS>>\n\n"
-INST_PREFIX = "<s>[INST] "
+SYS_PREFIX = "<<SYS>> "
+SYS_POSTFIX = " <</SYS>> "
+INST_PREFIX = "<s> [INST] "
 INST_POSTFIX = " "
 OUTPUT_PREFIX = "[/INST] "
 OUTPUT_POSTFIX = "</s>"
 
-def preprocess(data_point):
-    global tokenizer
-    cutoff_len = 1280
+def seed_everything(seed=42):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
+def preprocess(data_point, tokenizer, cutoff_len):
     dialog = data_point['dialog']
 
     roles = [msg["role"] for msg in dialog]
@@ -50,7 +56,7 @@ def preprocess(data_point):
 
     for role, msg in zip(roles, messages):
         if role.upper() == "ASSISTANT":
-            input_messages.append(msg + OUTPUT_POSTFIX)
+            input_messages.append(msg + " " + OUTPUT_POSTFIX)
         elif role.upper() == "USER":
             input_messages.append(INST_PREFIX + msg + INST_POSTFIX + OUTPUT_PREFIX)
 
@@ -95,9 +101,16 @@ def train(
     num_epochs: int = 3,
     learning_rate: float = 3e-4,
     cutoff_len: int = 256,
-    val_set_size: int = 2000,
+    val_set_size: float = 0.3,
+    max_grad_norm: float = 0.3,
+    warmup_ratio: float = 0.03,
+    weight_decay: float = 0.01,
+    adam_beta1: float = 0.9,
+    adam_beta2: float = 0.999,
+    adam_epsilon: float = 1e-8,
+    optim: str = "paged_adamw_32bit",
     # lora hyperparams
-    train_lora: bool = True,
+    train_qlora: bool = True,
     lora_r: int = 8,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
@@ -106,6 +119,7 @@ def train(
         "v_proj",
     ],
     # llm hyperparams
+    seed: int = 42,
     train_on_inputs: bool = True,  # if False, masks out inputs in loss
     add_eos_token: bool = False,
     group_by_length: bool = False,  # faster, but produces an odd training loss curve
@@ -115,41 +129,17 @@ def train(
     wandb_watch: str = "",  # options: false | gradients | all
     wandb_log_model: str = "",  # options: false | true
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
-    prompt_template_name: str = "alpaca",  # The prompt template to use, will default to alpaca.
     test_path: str = None, # Run test case
     huggingface_token: str = None, # token to login huggingface
     huggingface_repo: str = None, # push to repo
     wandb_api_key: str = None, # Wandb api key
 ):
-    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-        print(
-            f"Training Alpaca-LoRA model with params:\n"
-            f"base_model: {base_model}\n"
-            f"data_path: {data_path}\n"
-            f"output_dir: {output_dir}\n"
-            f"batch_size: {batch_size}\n"
-            f"micro_batch_size: {micro_batch_size}\n"
-            f"num_epochs: {num_epochs}\n"
-            f"learning_rate: {learning_rate}\n"
-            f"cutoff_len: {cutoff_len}\n"
-            f"val_set_size: {val_set_size}\n"
-            f"lora_r: {lora_r}\n"
-            f"lora_alpha: {lora_alpha}\n"
-            f"lora_dropout: {lora_dropout}\n"
-            f"lora_target_modules: {lora_target_modules}\n"
-            f"train_on_inputs: {train_on_inputs}\n"
-            f"add_eos_token: {add_eos_token}\n"
-            f"group_by_length: {group_by_length}\n"
-            f"wandb_project: {wandb_project}\n"
-            f"wandb_run_name: {wandb_run_name}\n"
-            f"wandb_watch: {wandb_watch}\n"
-            f"wandb_log_model: {wandb_log_model}\n"
-            f"resume_from_checkpoint: {resume_from_checkpoint or False}\n"
-            f"prompt template: {prompt_template_name}\n"
-        )
+
     assert (
         base_model
     ), "Please specify a --base_model, e.g. --base_model='huggyllama/llama-7b'"
+    
+    seed_everything(seed)
     gradient_accumulation_steps = batch_size // micro_batch_size
 
     device_map = "auto"
@@ -179,26 +169,47 @@ def train(
         torch_dtype=torch.float16,
         device_map=device_map,
     )
-    global tokenizer
-    tokenizer = LlamaTokenizer.from_pretrained(base_model)
+
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
 
     tokenizer.pad_token_id = (
         0  # unk. we want this to be different from the eos token
     )
     tokenizer.padding_side = "left"  # Allow batched inference
 
-    if train_lora:
-        model = prepare_model_for_int8_training(model)
-
-        config = LoraConfig(
-            r=lora_r,
-            lora_alpha=lora_alpha,
-            target_modules=lora_target_modules,
-            lora_dropout=lora_dropout,
-            bias="none",
-            task_type="CAUSAL_LM",
+    if train_qlora is True:
+        optim="paged_adamw_8bit"
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
         )
-        model = get_peft_model(model, config)
+        try:
+            model = AutoModelForCausalLM.from_pretrained(
+                base_model,
+                device_map=device_map,
+                trust_remote_code=True,
+                quantization_config=bnb_config,
+            )
+        except:
+            model = AutoModelForCausalLM.from_pretrained(
+                base_model,
+                device_map=device_map,
+                trust_remote_code=True,
+                quantization_config=bnb_config,
+                use_safetensors=True
+            )
+        model = prepare_model_for_kbit_training(model)
+
+    else:
+        model = LlamaForCausalLM.from_pretrained(
+            base_model,
+            load_in_8bit=True,
+            torch_dtype=torch.float16,
+            device_map=device_map,
+        )
+        model = prepare_model_for_kbit_training(model)
 
     if data_path.endswith(".json") or data_path.endswith(".jsonl"):
         data = load_dataset("json", data_files=data_path)
@@ -225,27 +236,27 @@ def train(
         else:
             print(f"Checkpoint {checkpoint_name} not found")
 
-    if train_lora:
-        model.print_trainable_parameters()  # Be more transparent about the % of trainable params.
 
     if val_set_size > 0:
         train_val = data["train"].train_test_split(
             test_size=val_set_size, shuffle=True, seed=42
         )
         train_data = (
-            train_val["train"].shuffle().map(preprocess)
-        )
+            train_val["train"].shuffle().map(lambda x: preprocess(x, tokenizer, cutoff_len))
+        ).filter(lambda x: len(x['input_ids']) < cutoff_len)
         val_data = (
-            train_val["test"].shuffle().map(preprocess)
-        )
+            train_val["test"].shuffle().map(lambda x: preprocess(x, tokenizer, cutoff_len))
+        ).filter(lambda x: len(x['input_ids']) < cutoff_len)
+
     else:
-        train_data = data["train"].shuffle().map(preprocess)
+        train_data = data["train"].shuffle().map(lambda x: preprocess(x, tokenizer, cutoff_len))
         val_data = None
 
     if not ddp and torch.cuda.device_count() > 1:
         # keeps Trainer from trying its own DataParallelism when more than 1 gpu is available
         model.is_parallelizable = True
         model.model_parallel = True
+
 
     epoch_steps =  len(train_data) // batch_size
     total_steps = num_epochs * epoch_steps
@@ -258,19 +269,26 @@ def train(
         eval_dataset=val_data,
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
+            per_device_eval_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=0,
+            warmup_ratio=warmup_ratio,
+            weight_decay = weight_decay,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
+            adam_beta1=adam_beta1,
+            adam_beta2=adam_beta2,
+            adam_epsilon=adam_epsilon,
+            lr_scheduler_type="cosine",
+            max_grad_norm=max_grad_norm,
+            optim=optim,
             fp16=True,
             logging_steps=logging_steps,
-            optim="adamw_torch",
             evaluation_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="steps",
             eval_steps=eval_steps if val_set_size > 0 else None,
             save_steps=eval_steps,
             output_dir=output_dir,
-            save_total_limit=3,
+            save_total_limit=1,
             load_best_model_at_end=True if val_set_size > 0 else False,
             ddp_find_unused_parameters=False if ddp else None,
             group_by_length=group_by_length,
@@ -323,30 +341,25 @@ def write_json(path, obj):
 
 
 def generate_response(prompt, model, tokenizer, max_length = 1500):
-    encoding = tokenizer(prompt, padding=True, truncation=True, return_tensors="pt", max_length = max_length)
+    encoding = tokenizer(prompt, padding=True, 
+                         truncation=True, 
+                         return_tensors="pt", 
+                         max_length = max_length, 
+                         add_special_tokens=False)
+    
     input_ids = encoding["input_ids"].to(model.device)
     attention_mask = encoding['attention_mask'].to(model.device)
-
-    min_idx = 10000
-    for ids in input_ids:
-        r = (ids==tokenizer.pad_token_id).nonzero(as_tuple=True)[0]
-        if len(r) == 0:
-          min_idx = 0
-          break
-
-        max_idx = max(r)
-        min_idx = min(max_idx, min_idx)
-
-    input_ids = input_ids[:,min_idx:]
-    attention_mask = attention_mask[:,min_idx:]
 
     generation_config = GenerationConfig(
         temperature=0.1,
         top_p=1,
         do_sample = True,
         num_beams = 1,
-        top_k = 50
+        top_k = 50,
+        pad_token_id = tokenizer.pad_token_id,
+        eos_token_id = tokenizer.eos_token_id
     )
+    
     with torch.inference_mode():
         return model.generate(
             input_ids=input_ids,

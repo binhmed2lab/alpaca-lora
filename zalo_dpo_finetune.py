@@ -370,6 +370,9 @@ def train(
         pass
         
     if dpo_finetune:
+        # prepare
+        model = prepare_model_for_kbit_training(model)
+
         raw_dpo_data = read_json(dpo_path)
         dpo_data = {
             "prompt": [],

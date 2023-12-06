@@ -29,6 +29,7 @@ def write_json(obj, path):
     with open(path, "w", encoding="utf-8") as outfile:
         outfile.write(json_object)
 
+
 def batch_inference(data, model, tokenizer, batch_size = 4, max_length = 1500):
     tk = tqdm(range(0, len(data), batch_size))
     predictions = []
@@ -52,7 +53,7 @@ def get_dialog_string(dialog):
 
     for role, msg in zip(roles, messages):
         if role.upper() == "ASSISTANT":
-            prompt += f"{msg}{OUTPUT_POSTFIX}"
+            prompt += f"{msg} {OUTPUT_POSTFIX}"
         elif role.upper() == "USER":
             prompt += f"{INST_PREFIX}{msg}{INST_POSTFIX}{OUTPUT_PREFIX}"
     
@@ -74,7 +75,6 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
             data = data[:test_limit]
             
         print(f"Test limit of {test_limit}, remaining {len(data)}")
-
 
     print("Start validating:", data_name)
     predict_items = []
@@ -100,12 +100,11 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
                         "item_id": item_id,
                         "dialog_position": dialog_pos
                     })
-                prompt += f"{msg}{OUTPUT_POSTFIX}"
+                prompt += f"{msg} {OUTPUT_POSTFIX}"
             elif role.upper() == "USER":
                 prompt += f"{INST_PREFIX}{msg}{INST_POSTFIX}{OUTPUT_PREFIX}"
 
             prev_role = role.upper()
-
 
     prompts = [p['prompt'] for p in predict_items]
     results = batch_inference(prompts, model, tokenizer, batch_size = batch_size, max_length = max_length)

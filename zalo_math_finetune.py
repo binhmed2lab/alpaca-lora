@@ -415,6 +415,7 @@ def generate_response(prompt, model, tokenizer, max_length = 1500, temperature =
                          return_tensors="pt", 
                          max_length = max_length, 
                          add_special_tokens=False)
+    
     input_ids = encoding["input_ids"].to(model.device)
     attention_mask = encoding['attention_mask'].to(model.device)
 
