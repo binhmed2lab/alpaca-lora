@@ -124,7 +124,13 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
 
     tk = tqdm(data, total=len(data))
     answer_choices = ["Assistant A", "Assistant B", "Equally Good", "Equally Bad"]
-    stats = {a: 0 for a in answer_choices}
+
+    criterias = ["Who follow the INSTRUCTION better?",
+        "Who using medical knowledge properly?",
+        "Who provide the better feedback?"]
+    
+    agg_stats = {c: {a: 0 for a in answer_choices} for c in criterias}
+
     total_usage = {
         "completion_tokens": 0,
         "prompt_tokens": 0,
@@ -137,23 +143,34 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
             dialog_a=gpt4_dialog,
             dialog_b=llama2_dialog,
             answer_choices=answer_choices,
-            model=gpt_model
+            model=gpt_model,
+            criterias=criterias
         )
-        analyzed_result = package['response']
+        analyzed_results = package['analysis']
         usage = package['usage']
         total_usage['completion_tokens'] += usage['completion_tokens']
         total_usage['prompt_tokens'] += usage['prompt_tokens']
 
-        d['analyzed_result'] = analyzed_result
-        if analyzed_result in stats:
-            stats[analyzed_result] += 1
+
+        d['analysis'] = analyzed_results # save to data
+        for result in analyzed_results:
+            criteria = result.get("criteria")
+            answer_choice = result.get("answer_choice", None)
+            if answer_choice is None: continue
+            if answer_choice in agg_stats[criteria]:
+                agg_stats[criteria][answer_choice] += 1
+            
             tk.set_postfix(
-                stats = stats
+                stats = str(agg_stats)
             )
-        else:
-            tk.set_postfix(
-                Error = analyzed_result
-            )
+
+    beautified_data = []
+    for d in data:
+         beautified_data.append({
+            "gpt4": d['dialog'],
+            "finetune": d['predict_dialog'],
+            "analysis": d['analysis']
+         })
     
     gpt_pricing = {
         "gpt-3.5-turbo": (0.002, 0.002),
@@ -166,11 +183,11 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
     completion_cost = total_usage['completion_tokens'] * complete_p / 1000
     final_cost = prompt_cost + completion_cost
     print(f"Experiment cost: prompt {prompt_cost} | completion {completion_cost} | final {final_cost}")
-    print(stats)
+    print(agg_stats)
     today = datetime.now()
     finalize = {
-        "run_data": data,
-        "result": stats,
+        "run_data": beautified_data,
+        "agg_stats": agg_stats,
         "chatgpt_cost": {
             "prompt_cost": prompt_cost,
             "completion_cost": completion_cost,
