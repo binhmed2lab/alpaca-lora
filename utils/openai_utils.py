@@ -88,7 +88,7 @@ def Compare2Dialog(dialog_a, dialog_b, answer_choices, criterias, model):
 
         Answer choices: Assistant A, Assistant B, Equally Good, Equally Bad.
         Answer format: 
-        1. Answer choice - Brief Explanation provides evidences and citations from their speech.
+        1. Answer choice - Brief Explanation provides evidences and citations from their speech. If prossible, cite where the assistant doesn't follow INSTRUCTION.
          
         Example Answer:
         1. Assistant A - Because...
@@ -104,7 +104,7 @@ def Compare2Dialog(dialog_a, dialog_b, answer_choices, criterias, model):
         max_tokens=512
     )
 
-    analysis_package = process_analysis(package, criterias)['response']
+    analysis_package = process_analysis(package['response'], criterias)
 
     return {
         "analysis": analysis_package,

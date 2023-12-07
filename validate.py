@@ -176,6 +176,7 @@ def ValidateFinetunePerformance(model, tokenizer, data, data_name, gpt_model, ba
         "gpt-3.5-turbo": (0.002, 0.002),
         "gpt-3.5-turbo-0613": (0.002, 0.002),
         "gpt-4": (0.03, 0.06),
+        "gpt-4-1106-preview": (0.01, 0.03),
         "text-davinci-003": (0.02, 0.02)
     }
     prompt_p, complete_p = gpt_pricing[gpt_model]
